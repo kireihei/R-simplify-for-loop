@@ -1,1 +1,0 @@
-It is very slow when I try to run line 37-45 in the file "Index of stocks.Rmd". There may be an easier way to do it. I just want to replace the data "positions" column for other dates than 1995-01-31.
