@@ -1,0 +1,215 @@
+---
+title: "Project - Wenxuan Sun"
+author: "Wenxuan Sun"
+date: "09/04/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Dataset information:
+- data_full.RData contains data of 928 stocks from 1995-01-31 to 2021-02-26, updated every month.
+
+# Steps:
+- Set up a benchmark (data_index.RData) by attributing 100 USD to each stock (928 in total) at the beginning date 1995-01-31. The amount bought at that moment is calculated by 100USD/Close price at the beginning.
+- Set up a trading strategy: select the stocks with Mkt_Cap quantile in 40%~85%. Then attribute equal amount of USD to each of them.
+- Compare the performance of index and the portfolio
+
+
+Load required packages
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(tibble)
+library(tseries)
+```
+
+Set workpath and load datasets
+```{r}
+setwd("C:/Gggggg/MSc in Finance EMLYON/Data Science R/Project")
+load("data_esg.RData")
+load("data_full.RData")
+head(data_full)
+summary(data_full)
+```
+Function to change the positions
+```{r}
+# Warning: this only applies to equal USD amount attributed to each stock
+# The target stock will be bought in equal USD amount with available cash
+change_pos = function(date, pos_now, tick_tgt){
+  # date of changing position should be in date format "yyyy-mm-dd"
+  # pos_now should be a 2column*nrow dataframe containing $Tick and $Position
+  # tick_tgt should be a vector or a list of Tick (only the ones available in data_full)
+  df_now = data_full[data_full$Date == date, ]
+  price_now = df_now %>% filter(Tick %in% pos_now$Tick) %>% select(Close)
+  cash = t(price_now) %*% pos_now1$Position
+  price_tgt = df_now %>% filter(Tick %in% tick_tgt) %>% select(Close)
+  pos_tgt = rep(cash / length(tick_tgt), length(tick_tgt)) / price_tgt$Close
+  return(data.frame(Tick=tick_tgt, Position=pos_tgt))
+}
+```
+Set up the index table (benchmark)
+The index is built with 100 USD for each stock at the beginning date 1995-01-31.
+The index at the first date is 92,800 USD and ends at 2,475,168.2 USD on 2021-02-26.
+```{r}
+data_full = data_full %>% arrange(Date)  # arrange dates
+data_full$Date = as.Date(data_full$Date, origin="1970-01-01")
+
+min_date = min(data_full$Date)  # begin date
+max_date = max(data_full$Date)  # end date
+
+c100 = rep(100, length(data_full[data_full$Date == min_date, ]$Close))  # create a vector with length of 928 filling with 100
+
+close_1 = data_full[data_full$Date == min_date, ]$Close # close price of 928 stocks at the beginning date
+Position = c100 / close_1  # positions for 928 stocks
+
+# index = position * price
+index_1 = t(Position) %*% close_1  # index at the beginning
+
+data_index = data.frame(Date=character(), Index=numeric())  # dataframe of the index
+
+for(i in unique(data_full$Date)){
+  i = as.Date(i, origin="1970-01-01")
+  close_i = data_full[data_full$Date == i, ]$Close
+  index_i = t(Position) %*% close_i
+  data_index_i = data.frame(Date=i, Index=index_i)
+  data_index = rbind(data_index, data_index_i)
+}
+
+
+# Add a return column in data_index
+data_index = data_index %>%
+  mutate(Index_Return = Index / lag(Index) - 1)
+head(data_index)
+
+# remove variables that are useless later
+rm(c100)
+rm(close_1)
+rm(close_i)
+rm(i)
+rm(Position)
+rm(index_i)
+rm(index_1)
+rm(data_index_i)
+```
+Set up a portfolio at the percentile 40%~85% of Market Cap
+If the value of portfolio goes below 90% of index value, the percentile of Mkt_Cap will be recalculated and a new portfolio will be selected.
+```{r}
+# data at the beginning date 1995-01-31
+data_full_1 = data_full %>% 
+  filter(Date == min_date) %>% 
+  arrange(Tick)
+data_full_1 = data_full_1[!is.na(data_full_1$Mkt_Cap), ]  # remove na values in market cap column
+
+quan_upper_1 = unname(quantile(data_full_1$Mkt_Cap, probs=0.85, na.rm=TRUE))  # 85% quantile of market cap on 1995-01-31
+quan_lower_1 = unname(quantile(data_full_1$Mkt_Cap, probs=0.40, na.rm=TRUE))  # 40% quantile of market cap on 1995-01-31
+close_1 = data_full_1[data_full_1$Mkt_Cap <= quan_upper_1 & data_full_1$Mkt_Cap >= quan_lower_1, ]$Close  # Close price of the selected stocks on 1995-01-31
+stock_selected = data_full_1[data_full_1$Mkt_Cap <= quan_upper_1 & data_full_1$Mkt_Cap >= quan_lower_1, ]$Tick  # list of selected stock
+money = rep(length(unique(data_full$Tick)) * 100 / length(stock_selected), length(stock_selected))  # money attributed to each selected stock
+position = money / close_1  # Positions of selected stock
+
+data_port = data.frame(Date=character(), Port_Value=numeric)  # dataframe of the portfolio
+data_selected = data_full %>% filter(Tick %in% stock_selected)  # data of selected stocks
+
+print(length(stock_selected))
+
+for(i in unique(data_selected$Date)){
+  i = as.Date(i, origin="1970-01-01")
+  close_i = data_selected[data_selected$Date == i, ]$Close
+  value_i = t(position) %*% close_i
+  value_index_i = data_index[data_index$Date == i, ]$Index
+  data_port_i = data.frame(Date=i, Port_Value=value_i)
+  data_port = rbind(data_port, data_port_i)
+}
+
+# Add a return column in data_port
+data_port = data_port %>%
+  mutate(Port_Return = Port_Value / lag(Port_Value) - 1)
+head(data_port)
+
+# Remove unnecessary variables
+rm(data_full_1)
+rm(data_port_i)
+rm(data_selected)
+rm(value_i)
+rm(close_1)
+rm(close_i)
+rm(i)
+rm(money)
+rm(position)
+rm(quan_upper_1)
+rm(quan_lower_1)
+rm(stock_selected)
+
+# for(i in unique(data_full$Date)){
+#   i = as.Date(i, origin="1970-01-01")  # convert i into date format
+#   data_full_i = data_full %>% filter(Date == i)
+#   quan_90_i = unname(quantile(data_full_i$Mkt_Cap, probs=0.9, na.rm=TRUE))
+#   portfolio_i = data_full_i %>% filter(Mkt_Cap >= quan_90_i)
+# }
+```
+Plot the trend of benchmark and the portfolio
+```{r}
+data_trend = merge(data_port, data_index, by="Date") %>%
+  subset(select=-c(Port_Return, Index_Return)) %>% 
+  reshape2::melt(id.var='Date')
+data_trend %>% 
+  ggplot(aes(x=Date, y=value, color=variable)) +  
+  geom_line() +
+  ggtitle("Portfolio vs. Index") +
+  xlab("Date") + 
+  ylab("Value in USD") +
+  theme(plot.title = element_text(color="red", size=18, face="bold.italic"),
+    axis.title.x = element_text(color="green", size=16, face="bold"),
+    axis.title.y = element_text(color="#FF11BB", size=16, face="bold"))
+rm(data_trend)
+
+data_return = merge(data_port, data_index, by="Date") %>% 
+  subset(select=-c(Port_Value, Index)) %>% 
+  reshape2::melt(id.var='Date') %>% 
+  na.omit()
+# Simple monthly return
+data_return %>% 
+  ggplot(aes(x=Date, y=value)) +  
+  geom_area(aes(color=variable), alpha=0.4) +
+  ggtitle("Portfolio return vs. Index return") +
+  xlab("Date") + 
+  ylab("Return") +
+  labs(caption="This is the simple monthly return calculated by division") +
+  theme(plot.title = element_text(color="red", size=18, face="bold.italic"),
+    axis.title.x = element_text(color="green", size=16, face="bold"),
+    axis.title.y = element_text(color="#FF11BB", size=16, face="bold"),
+    plot.caption = element_text(color="#22AAFF", size=12))
+```
+Compare the performance between portfolio and index
+```{r}
+# total return
+total_rt_index = data_index[data_index$Date == max_date, ]$Index / 
+  data_index[data_index$Date == min_date, ]$Index - 1  # total return of index
+total_rt_port = data_port[data_port$Date == max_date, ]$Port_Value / 
+  data_port[data_port$Date == min_date, ]$Port_Value - 1  # total return of index
+
+# Index return volatility (SD)
+rt_vol_index = 12 * sd(data_index$Index_Return, na.rm=TRUE)
+# Portfolio return volatility (SD)
+rt_vol_port = 12 * sd(data_port$Port_Return, na.rm=TRUE)
+
+# Maximum drawdown
+max_dd_index = tseries::maxdrawdown(data_index$Index)$maxdrawdown
+max_dd_port = tseries::maxdrawdown(data_port$Port_Value)$maxdrawdown
+
+summary_df = data.frame(Type=c("Index", "Portfolio"),
+                        Value_Begin=c(data_index[data_index$Date == min_date, ]$Index, 
+                                      data_port[data_port$Date == min_date, ]$Port_Value),
+                        Value_End=c(data_index[data_index$Date == max_date, ]$Index,
+                                    data_port[data_port$Date == max_date, ]$Port_Value),
+                        Total_Return=c(total_rt_index, total_rt_port),
+                        Return_Volatility=c(rt_vol_index, rt_vol_port),
+                        Maximum_Drawdown=c(max_dd_index, max_dd_port))
+print(summary_df)
+```
+
+
+
